@@ -1,80 +1,55 @@
-from linebot.v3 import (
-    WebhookHandler
+from linebot import WebhookHandler
+from linebot.models import (
+    MessageEvent, TextMessage, TextSendMessage
 )
-from linebot.v3.messaging import (
-    Configuration,
-    ApiClient,
-    MessagingApi,
-    ReplyMessageRequest,
-    TextMessage,
-    ShowLoadingAnimationRequest
-)
-import json
+from linebot.exceptions import InvalidSignatureError
+from flask import request, abort, jsonify
 import os
-import requests
-from PIL import Image
-from io import BytesIO
-from firebase import firebase
-import google.generativeai as genai
+import json
 
+# Initialize the webhook handler with your Channel Secret
+handler = WebhookHandler(os.getenv('ChannelSecret'))
 
-# 使用環境變量讀取憑證
-secret = os.getenv('ChannelSecret', None)
-token = os.getenv('ChannelAccessToken', None)
-# firebase_url = os.getenv('FIREBASE_URL')
-
-
-handler = WebhookHandler(secret)
-configuration = Configuration(
-    access_token=token
-)
-
-
+# Define your webhook endpoint function
 def linebot(request):
-    body = request.get_data(as_text=True)
-    json_data = json.loads(body)
-    try:
+    # Check if the request method is POST
+    if request.method == 'POST':
+        # Get the request body as text
+        body = request.get_data(as_text=True)
+        signature = request.headers.get('X-Line-Signature')
 
-        signature = request.headers['X-Line-Signature']
-        handler.handle(body, signature)
-        event = json_data['events'][0]
-        reply_token = event['replyToken']
-        user_id = event['source']['userId']
-        msg_type = event['message']['type']
+        try:
+            # Handle the webhook event
+            handler.handle(body, signature)
+        except InvalidSignatureError:
+            abort(400)
 
-        if msg_type == 'text':
-            msg = event['message']['text']
+        return 'OK'
+    else:
+        # Handle non-POST requests gracefully
+        return jsonify({'message': 'Method not allowed'}), 405
 
-            with ApiClient(configuration) as api_client:
-                line_bot_api = MessagingApi(api_client)
-                line_bot_api.show_loading_animation(ShowLoadingAnimationRequest(
-                    chatId=user_id, loadingSeconds=20))
+# Define message event handler for handling text messages
+@handler.add(MessageEvent, message=TextMessage)
+def handle_text_message(event):
+    # Get the user ID and text message from the event
+    user_id = event.source.user_id
+    msg = event.message.text
 
-                if msg == '!清空':
-                    reply_msg = '已清空'
-                    # fdb.delete(user_chat_path, None)
-                elif msg == '!摘要':
-                    reply_msg = msg # test
-                else:
-                    reply_msg = "哈囉你好嗎"
+    # Process the received message
+    if msg == '!清空':
+        reply_msg = '已清空'
+        # Implement logic for clearing data or performing specific actions
+    elif msg == '!摘要':
+        reply_msg = '尚未實作摘要功能'  # Placeholder for summary feature
+    else:
+        reply_msg = "哈囉你好嗎"
 
-                line_bot_api.reply_message(
-                    ReplyMessageRequest(
-                        reply_token=reply_token,
-                        messages=[
-                            TextMessage(text=reply_msg),
-                        ]))
-        else:
-            with ApiClient(configuration) as api_client:
-                line_bot_api = MessagingApi(api_client)
-                line_bot_api.reply_message(
-                    ReplyMessageRequest(
-                        reply_token=reply_token,
-                        messages=[
-                            TextMessage(text='你傳的不是文字訊息喔'),
-                        ]))
+    # Send a reply message back to the user
+    line_bot_api.reply_message(
+        event.reply_token,
+        TextSendMessage(text=reply_msg)
+    )
 
-    except Exception as e:
-        detail = e.args[0]
-        print(detail)
+    # Return HTTP response OK
     return 'OK'
